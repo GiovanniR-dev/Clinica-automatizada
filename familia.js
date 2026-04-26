@@ -3,31 +3,26 @@ import {
   doc, getDoc, updateDoc
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-/**
- * Abre o modal de dependente e salva no Firestore.
- * Chamada pelo botão "Adicionar Dependente" no dashboard.
- */
+
 window.adicionarDependente = async function () {
-  // Verifica autenticação antes de qualquer operação
+  
   if (!auth.currentUser) {
     exibirNotificacao("Você precisa estar logado para adicionar dependentes.", "erro");
     return;
   }
 
-  // Exibe modal embutido em vez de usar prompt() bloqueante
+  
   const modal = document.getElementById("modal-dependente");
   if (modal) {
     modal.style.display = "flex";
     return;
   }
 
-  // Fallback: se não houver modal no HTML, usa inputs inline criados dinamicamente
+ 
   criarModalDependente();
 };
 
-/**
- * Salva o dependente — chamada pelo botão "Confirmar" dentro do modal.
- */
+
 window.confirmarDependente = async function () {
   const nomeInput  = document.getElementById("dep-nome");
   const idadeInput = document.getElementById("dep-idade");
@@ -63,7 +58,7 @@ window.confirmarDependente = async function () {
 
     await updateDoc(ref, { familia });
 
-    // Limpa e fecha o modal
+   
     if (nomeInput)  nomeInput.value  = "";
     if (idadeInput) idadeInput.value = "";
     fecharModalDependente();
