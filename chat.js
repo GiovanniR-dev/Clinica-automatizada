@@ -3,7 +3,6 @@ import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase
 import { API_BASE_URL } from "./config.js";
 import { processarAgendamento } from "./agendamento.js";
 
-// Histórico de mensagens mantido em memória para dar contexto à IA
 const historico = [];
 
 async function getUsuario() {
@@ -19,7 +18,6 @@ window.enviarMensagem = async function () {
   const msg   = input.value.trim();
   if (!msg) return;
 
-  // Desabilita envio durante processamento
   input.disabled = true;
   document.querySelector(".input-area button").disabled = true;
 
@@ -47,10 +45,8 @@ Regras:
 {"acao":"agendar","paciente":"","exame":"","data":"YYYY-MM-DD","hora":"HH:MM"}
 `.trim();
 
-    // Adiciona mensagem do usuário ao histórico antes de enviar
     historico.push({ role: "user", content: msg });
 
-    // Chama o proxy backend (nunca a API diretamente do frontend)
     const resposta = await fetch(`${API_BASE_URL}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -65,13 +61,11 @@ Regras:
     const data  = await resposta.json();
     const texto = data.content || "Não entendi. Pode repetir?";
 
-    // Adiciona resposta da IA ao histórico
     historico.push({ role: "assistant", content: texto });
 
     loading.remove();
     adicionarChat(texto, "bot");
 
-    // Tenta extrair JSON mesmo que venha com texto ao redor
     const jsonMatch = texto.match(/\{[\s\S]*"acao"\s*:\s*"agendar"[\s\S]*\}/);
     if (jsonMatch) {
       try {
@@ -80,7 +74,6 @@ Regras:
           await processarAgendamento(json, adicionarChat);
         }
       } catch {
-        // JSON malformado — ignora silenciosamente
       }
     }
 
@@ -95,7 +88,6 @@ Regras:
   }
 };
 
-// ─── UI Helpers ──────────────────────────────────────────────────────────────
 function adicionarChat(texto, tipo) {
   const chat = document.getElementById("chat");
   const div  = document.createElement("div");
