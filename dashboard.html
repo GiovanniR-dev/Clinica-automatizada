@@ -25,7 +25,6 @@
   <button id="btn-enviar" onclick="enviarMensagem()">➤</button>
 </div>
 
-<!-- Modal Dependente -->
 <div id="modal-dependente" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);
      align-items:center;justify-content:center;z-index:999;">
   <div class="card" style="width:320px">
@@ -42,7 +41,6 @@
 
 <script type="module">
 
-// ── Firebase — importado direto do CDN, sem depender de firebase.js local ─────
 import { initializeApp, getApps, getApp }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth, signOut, onAuthStateChanged }
@@ -52,7 +50,6 @@ import { getFirestore, enableIndexedDbPersistence,
          query, where, getDocs, addDoc, deleteDoc, Timestamp }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-// ── Init Firebase — protegido contra dupla inicialização ──────────────────────
 const FIREBASE_CONFIG = {
   apiKey:     "AIzaSyAO7EWk7wx1dgX7aFNQzZGuq04U5CgxSW4",
   authDomain: "clinica-661a4.firebaseapp.com",
@@ -63,23 +60,18 @@ const app  = getApps().length === 0 ? initializeApp(FIREBASE_CONFIG) : getApp();
 const auth = getAuth(app);
 const db   = getFirestore(app);
 
-// Habilita persistência offline para evitar "client is offline" em recarregamentos
 enableIndexedDbPersistence(db).catch(e => {
-  // Falha silenciosa — múltiplas abas abertas causam esse erro, não é crítico
   if (e.code !== "failed-precondition" && e.code !== "unimplemented") {
     console.warn("Persistência offline não disponível:", e.code);
   }
 });
 
-// ── OpenRouter ────────────────────────────────────────────────────────────────
 const OPENROUTER_KEY = "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";
 const MODEL          = "anthropic/claude-3.5-haiku";
 
-// ── Estado ────────────────────────────────────────────────────────────────────
 let usuario     = null;
 const historico = [];
 
-// ── Tools do agente ───────────────────────────────────────────────────────────
 const TOOLS = [
   {
     type: "function",
@@ -144,7 +136,6 @@ const TOOLS = [
   }
 ];
 
-// ── Execução real das tools no Firestore ──────────────────────────────────────
 const executarTool = {
 
   async verificar_disponibilidade({ data, hora }) {
@@ -207,11 +198,9 @@ const executarTool = {
   }
 };
 
-// ── Auth — aguarda Firebase estar pronto antes de qualquer operação ────────────
 onAuthStateChanged(auth, async (user) => {
   if (!user) { window.location.href = "index.html"; return; }
 
-  // Retry com backoff — evita falha se o Firestore ainda estiver inicializando
   let tentativas = 0;
   const carregarUsuario = async () => {
     try {
@@ -226,7 +215,6 @@ onAuthStateChanged(auth, async (user) => {
     } catch (e) {
       tentativas++;
       if (tentativas <= 3) {
-        // Aguarda e tenta de novo — Firebase pode estar conectando
         await new Promise(r => setTimeout(r, 1500 * tentativas));
         return carregarUsuario();
       }
@@ -238,10 +226,8 @@ onAuthStateChanged(auth, async (user) => {
   await carregarUsuario();
 });
 
-// ── Sair ──────────────────────────────────────────────────────────────────────
 window.sair = async () => { await signOut(auth); window.location.href = "index.html"; };
 
-// ── Loop do agente ────────────────────────────────────────────────────────────
 window.enviarMensagem = async function () {
   if (!usuario) { adicionarChat("⏳ Ainda carregando seus dados...", "bot"); return; }
 
@@ -346,7 +332,6 @@ INSTRUÇÕES:
   }
 };
 
-// ── Dependentes ───────────────────────────────────────────────────────────────
 window.abrirModalDependente = () => {
   document.getElementById("modal-dependente").style.display = "flex";
 };
@@ -378,7 +363,6 @@ window.confirmarDependente = async () => {
   }
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 function adicionarChat(texto, tipo) {
   const chat = document.getElementById("chat");
   const div  = document.createElement("div");
