@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clínica IA</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<div class="header">
+  <span>🏥 Clínica IA</span>
+  <div class="header-actions">
+    <button class="btn-sm" onclick="abrirModalDependente()">+ Dependente</button>
+    <button class="btn-sm btn-outline" onclick="sair()">Sair</button>
+  </div>
+</div>
+
+<div id="chat" class="chat-container"></div>
+
+<div class="input-area">
+  <input id="msg" placeholder="Digite sua mensagem..." autocomplete="off"
+         onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensagem();}">
+  <button id="btn-enviar" onclick="enviarMensagem()">➤</button>
+</div>
+
+<!-- Modal Dependente -->
+<div id="modal-dependente" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);
+     align-items:center;justify-content:center;z-index:999;">
+  <div class="card" style="width:320px">
+    <h2 style="margin-bottom:16px">Adicionar Dependente</h2>
+    <label class="label">Nome completo</label>
+    <input id="dep-nome" type="text" placeholder="Nome do dependente">
+    <label class="label">Idade</label>
+    <input id="dep-idade" type="number" placeholder="Idade" min="0" max="120">
+    <p id="dep-msg" class="msg" style="min-height:18px"></p>
+    <button onclick="confirmarDependente()" style="margin-bottom:8px">Confirmar</button>
+    <button onclick="fecharModal()" style="background:rgba(255,255,255,.1)">Cancelar</button>
+  </div>
+</div>
+
+<script type="module">
+
+// ── Firebase — importado direto do CDN, sem depender de firebase.js local ─────
+import { initializeApp, getApps, getApp }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getAuth, signOut, onAuthStateChanged }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getFirestore, enableIndexedDbPersistence,
+         doc, getDoc, updateDoc, collection,
+         query, where, getDocs, addDoc, deleteDoc, Timestamp }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+// ── Init Firebase — protegido contra dupla inicialização ──────────────────────
+const FIREBASE_CONFIG = {
+  apiKey:     "AIzaSyAO7EWk7wx1dgX7aFNQzZGuq04U5CgxSW4",
+  authDomain: "clinica-661a4.firebaseapp.com",
+  projectId:  "clinica-661a4"
+};
+
+const app  = getApps().length === 0 ? initializeApp(FIREBASE_CONFIG) : getApp();
+const auth = getAuth(app);
+const db   = getFirestore(app);
+
+// Habilita persistência offline para evitar "client is offline" em recarregamentos
+enableIndexedDbPersistence(db).catch(e => {
+  // Falha silenciosa — múltiplas abas abertas causam esse erro, não é crítico
+  if (e.code !== "failed-precondition" && e.code !== "unimplemented") {
+    console.warn("Persistência offline não disponível:", e.code);
+  }
+});
+
+// ── OpenRouter ────────────────────────────────────────────────────────────────
+const OPENROUTER_KEY = "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";
+const MODEL          = "anthropic/claude-3.5-haiku";
+
+// ── Estado ────────────────────────────────────────────────────────────────────
+let usuario     = null;
+const historico = [];
+
+// ── Tools do agente ───────────────────────────────────────────────────────────
+const TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "verificar_disponibilidade",
+      description: "Verifica se um horário está disponível na clínica. Use SEMPRE antes de criar um agendamento.",
+      parameters: {
+        type: "object",
+        properties: {
+          data: { type: "string", description: "Data no formato YYYY-MM-DD" },
+          hora: { type: "string", description: "Hora no formato HH:MM" }
+        },
+        required: ["data", "hora"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "criar_agendamento",
+      description: "Cria um agendamento no sistema. Use apenas após verificar disponibilidade e confirmar com o paciente.",
+      parameters: {
+        type: "object",
+        properties: {
+          paciente: { type: "string", description: "Nome completo do paciente ou dependente" },
+          exame:    { type: "string", description: "Tipo de exame ou consulta" },
+          data:     { type: "string", description: "Data no formato YYYY-MM-DD" },
+          hora:     { type: "string", description: "Hora no formato HH:MM" }
+        },
+        required: ["paciente", "exame", "data", "hora"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "buscar_agendamentos",
+      description: "Busca agendamentos do paciente no sistema.",
+      parameters: {
+        type: "object",
+        properties: {
+          paciente: { type: "string", description: "Nome do paciente" }
+        },
+        required: ["paciente"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "cancelar_agendamento",
+      description: "Cancela um agendamento existente pelo ID.",
+      parameters: {
+        type: "object",
+        properties: {
+          agendamento_id: { type: "string", description: "ID do agendamento" },
+          motivo:         { type: "string", description: "Motivo do cancelamento" }
+        },
+        required: ["agendamento_id"]
+      }
+    }
+  }
+];
+
+// ── Execução real das tools no Firestore ──────────────────────────────────────
+const executarTool = {
+
+  async verificar_disponibilidade({ data, hora }) {
+    try {
+      const q   = query(collection(db, "agendamentos"), where("data","==",data), where("hora","==",hora));
+      const res = await getDocs(q);
+      return res.empty
+        ? { disponivel: true,  mensagem: `Horário ${hora} de ${fmt(data)} está disponível.` }
+        : { disponivel: false, mensagem: `Horário ${hora} de ${fmt(data)} já está ocupado. Sugira outro horário.` };
+    } catch (e) {
+      console.error("verificar_disponibilidade:", e);
+      return { erro: "Falha ao verificar disponibilidade." };
+    }
+  },
+
+  async criar_agendamento({ paciente, exame, data, hora }) {
+    try {
+      const q   = query(collection(db, "agendamentos"), where("data","==",data), where("hora","==",hora));
+      const res = await getDocs(q);
+      if (!res.empty) {
+        return { sucesso: false, mensagem: `Horário ${hora} de ${fmt(data)} foi ocupado agora. Peça outro horário ao paciente.` };
+      }
+      const ref = await addDoc(collection(db, "agendamentos"), {
+        paciente, exame, data, hora,
+        uid:      auth.currentUser?.uid || "",
+        criadoEm: Timestamp.now()
+      });
+      return {
+        sucesso:  true,
+        id:       ref.id,
+        mensagem: `Agendamento salvo. ID: ${ref.id}. Confirme ao paciente: ${exame} para ${paciente} em ${fmt(data)} às ${hora}.`
+      };
+    } catch (e) {
+      console.error("criar_agendamento:", e);
+      return { sucesso: false, erro: "Erro ao salvar no sistema." };
+    }
+  },
+
+  async buscar_agendamentos({ paciente }) {
+    try {
+      const q   = query(collection(db, "agendamentos"), where("paciente","==",paciente));
+      const res = await getDocs(q);
+      if (res.empty) return { agendamentos: [], mensagem: `Nenhum agendamento para ${paciente}.` };
+      const lista = res.docs.map(d => ({ id: d.id, ...d.data() }));
+      return { agendamentos: lista, total: lista.length };
+    } catch (e) {
+      console.error("buscar_agendamentos:", e);
+      return { erro: "Erro ao buscar agendamentos." };
+    }
+  },
+
+  async cancelar_agendamento({ agendamento_id, motivo }) {
+    try {
+      await deleteDoc(doc(db, "agendamentos", agendamento_id));
+      return { sucesso: true, mensagem: `Agendamento cancelado.${motivo ? " Motivo: " + motivo : ""}` };
+    } catch (e) {
+      console.error("cancelar_agendamento:", e);
+      return { sucesso: false, erro: "Erro ao cancelar. Verifique o ID." };
+    }
+  }
+};
+
+// ── Auth — aguarda Firebase estar pronto antes de qualquer operação ────────────
+onAuthStateChanged(auth, async (user) => {
+  if (!user) { window.location.href = "index.html"; return; }
+
+  // Retry com backoff — evita falha se o Firestore ainda estiver inicializando
+  let tentativas = 0;
+  const carregarUsuario = async () => {
+    try {
+      const snap = await getDoc(doc(db, "usuarios", user.uid));
+      if (!snap.exists()) throw new Error("Documento não encontrado.");
+      usuario         = snap.data();
+      usuario.familia = Array.isArray(usuario.familia) ? usuario.familia : [];
+      adicionarChat(
+        `👋 Olá, ${usuario.nome}! Sou o assistente da Clínica IA.\n\nPosso te ajudar com:\n• Agendar exames e consultas\n• Ver seus agendamentos\n• Cancelar ou reagendar\n• Agendar para dependentes\n\nComo posso te ajudar hoje?`,
+        "bot"
+      );
+    } catch (e) {
+      tentativas++;
+      if (tentativas <= 3) {
+        // Aguarda e tenta de novo — Firebase pode estar conectando
+        await new Promise(r => setTimeout(r, 1500 * tentativas));
+        return carregarUsuario();
+      }
+      console.error("Erro ao carregar usuário após retries:", e);
+      adicionarChat("❌ Não foi possível conectar. Verifique sua internet e recarregue a página.", "bot");
+    }
+  };
+
+  await carregarUsuario();
+});
+
+// ── Sair ──────────────────────────────────────────────────────────────────────
+window.sair = async () => { await signOut(auth); window.location.href = "index.html"; };
+
+// ── Loop do agente ────────────────────────────────────────────────────────────
+window.enviarMensagem = async function () {
+  if (!usuario) { adicionarChat("⏳ Ainda carregando seus dados...", "bot"); return; }
+
+  const input  = document.getElementById("msg");
+  const btnEnv = document.getElementById("btn-enviar");
+  const msg    = input.value.trim();
+  if (!msg) return;
+
+  input.disabled = btnEnv.disabled = true;
+  adicionarChat(msg, "user");
+  input.value = "";
+  const loading = adicionarChat("Digitando...", "bot");
+
+  const systemPrompt = `Você é um atendente virtual da Clínica IA, simpático e profissional.
+
+PACIENTE LOGADO:
+- Nome: ${usuario.nome}
+- Idade: ${usuario.idade} anos
+- Dependentes: ${usuario.familia.length > 0 ? usuario.familia.map(f=>`${f.nome} (${f.idade} anos)`).join(", ") : "nenhum"}
+
+INSTRUÇÕES:
+- Trate o paciente pelo primeiro nome
+- Antes de agendar, SEMPRE chame verificar_disponibilidade
+- Só confirme o agendamento após chamar criar_agendamento com sucesso
+- Se horário ocupado, sugira alternativas
+- Pode agendar para o paciente ou seus dependentes
+- Hoje: ${new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
+- Funcionamento: segunda a sábado, 07:00 às 18:00
+- Nunca invente horários disponíveis sem verificar`;
+
+  historico.push({ role: "user", content: msg });
+
+  try {
+    let iteracoes = 0;
+
+    while (iteracoes < 6) {
+      iteracoes++;
+
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${OPENROUTER_KEY}`,
+          "Content-Type":  "application/json",
+          "HTTP-Referer":  window.location.origin,
+          "X-Title":       "Clínica IA"
+        },
+        body: JSON.stringify({
+          model:       MODEL,
+          tools:       TOOLS,
+          tool_choice: "auto",
+          messages:    [{ role: "system", content: systemPrompt }, ...historico]
+        })
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+
+      const data     = await res.json();
+      const escolha  = data.choices?.[0];
+      const mensagem = escolha?.message;
+
+      if (!mensagem) throw new Error("Resposta vazia da API.");
+
+      historico.push(mensagem);
+
+      // IA quer chamar tools
+      if (escolha.finish_reason === "tool_calls" && mensagem.tool_calls?.length > 0) {
+        loading.innerText = "Verificando sistema...";
+
+        const resultados = await Promise.all(
+          mensagem.tool_calls.map(async (tc) => {
+            let params = {};
+            try { params = JSON.parse(tc.function.arguments); } catch {}
+            const fn = executarTool[tc.function.name];
+            const resultado = fn ? await fn(params) : { erro: `Tool "${tc.function.name}" não existe.` };
+            return {
+              role:         "tool",
+              tool_call_id: tc.id,
+              content:      JSON.stringify(resultado)
+            };
+          })
+        );
+
+        historico.push(...resultados);
+        continue; // IA continua decidindo
+      }
+
+      // IA tem resposta final
+      const texto = mensagem.content?.trim() || "Desculpe, não consegui processar. Pode repetir?";
+      loading.remove();
+      adicionarChat(texto, "bot");
+      break;
+    }
+
+  } catch (e) {
+    loading.remove();
+    console.error("Erro no agente:", e);
+    adicionarChat("❌ Erro de conexão. Verifique sua internet e tente novamente.", "bot");
+    if (historico.at(-1)?.role === "user") historico.pop();
+  } finally {
+    input.disabled = btnEnv.disabled = false;
+    input.focus();
+  }
+};
+
+// ── Dependentes ───────────────────────────────────────────────────────────────
+window.abrirModalDependente = () => {
+  document.getElementById("modal-dependente").style.display = "flex";
+};
+window.fecharModal = () => {
+  document.getElementById("modal-dependente").style.display = "none";
+  document.getElementById("dep-nome").value = "";
+  document.getElementById("dep-idade").value = "";
+  document.getElementById("dep-msg").textContent = "";
+};
+window.confirmarDependente = async () => {
+  if (!auth.currentUser) return;
+  const nome  = document.getElementById("dep-nome").value.trim();
+  const idade = parseInt(document.getElementById("dep-idade").value);
+  const msgEl = document.getElementById("dep-msg");
+  if (!nome)                 { msgEl.textContent = "Informe o nome.";           msgEl.className = "msg erro"; return; }
+  if (isNaN(idade)||idade<0) { msgEl.textContent = "Informe uma idade válida."; msgEl.className = "msg erro"; return; }
+  try {
+    const ref  = doc(db, "usuarios", auth.currentUser.uid);
+    const snap = await getDoc(ref);
+    const fam  = Array.isArray(snap.data()?.familia) ? snap.data().familia : [];
+    fam.push({ nome, idade });
+    await updateDoc(ref, { familia: fam });
+    usuario.familia = fam;
+    fecharModal();
+    adicionarChat(`✅ ${nome} adicionado(a)! Já posso agendar para ${nome} também.`, "bot");
+  } catch (e) {
+    msgEl.textContent = "Erro ao salvar.";
+    msgEl.className   = "msg erro";
+  }
+};
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function adicionarChat(texto, tipo) {
+  const chat = document.getElementById("chat");
+  const div  = document.createElement("div");
+  div.classList.add("message", tipo);
+  div.innerText = texto;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+  return div;
+}
+function fmt(iso) {
+  if (!iso?.includes("-")) return iso;
+  const [a,m,d] = iso.split("-");
+  return `${d}/${m}/${a}`;
+}
+
+</script>
+</body>
+</html>

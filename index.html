@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clínica IA — Acesso</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Tabs para alternar entre cadastro e login -->
+  <div class="card">
+    <div class="tabs">
+      <button class="tab active" onclick="trocarTab('login')">Entrar</button>
+      <button class="tab" onclick="trocarTab('cadastro')">Cadastrar</button>
+    </div>
+
+    <!-- LOGIN -->
+    <section id="tab-login">
+      <h2>Bem-vindo de volta</h2>
+
+      <label class="label" for="loginEmail">E-mail</label>
+      <input id="loginEmail" type="email" placeholder="seu@email.com" autocomplete="email">
+
+      <label class="label" for="loginSenha">Senha</label>
+      <input id="loginSenha" type="password" placeholder="••••••••" autocomplete="current-password">
+
+      <p id="msg-login" class="msg" role="alert"></p>
+
+      <button onclick="login()">Entrar</button>
+    </section>
+
+    <!-- CADASTRO -->
+    <section id="tab-cadastro" style="display:none">
+      <h2>Criar conta</h2>
+
+      <label class="label" for="nome">Nome completo</label>
+      <input id="nome" type="text" placeholder="João Silva" autocomplete="name">
+
+      <label class="label" for="email">E-mail</label>
+      <input id="email" type="email" placeholder="seu@email.com" autocomplete="email">
+
+      <label class="label" for="senha">Senha</label>
+      <input id="senha" type="password" placeholder="Mínimo 6 caracteres" autocomplete="new-password">
+
+      <label class="label" for="idade">Idade</label>
+      <input id="idade" type="number" placeholder="Ex: 30" min="18" max="120">
+
+      <p id="msg-cadastro" class="msg" role="alert"></p>
+
+      <button onclick="cadastrar()">Criar conta</button>
+    </section>
+
+  </div>
+</div>
+
+<script type="module" src="auth.js"></script>
+<script>
+  function trocarTab(aba) {
+    document.getElementById("tab-login").style.display    = aba === "login"    ? "block" : "none";
+    document.getElementById("tab-cadastro").style.display = aba === "cadastro" ? "block" : "none";
+    document.querySelectorAll(".tab").forEach((t, i) => {
+      t.classList.toggle("active", (i === 0) === (aba === "login"));
+    });
+  }
+</script>
+</body>
+</html>
